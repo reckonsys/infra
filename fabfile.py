@@ -1,3 +1,4 @@
+import json
 import posixpath
 from pipes import quote
 from os.path import dirname, realpath
@@ -55,6 +56,7 @@ def setup_env(app):
     env.env_path = posixpath.join(env.envs_path, env.app)
     env.projects_path = dirname(dirname(realpath(__file__)))
     env.app_path_local = posixpath.join(env.projects_path, env.app)
+    env.pipenv_path = posixpath.join(env.home_path, '.local/bin/pipenv')
 
 
 @task
@@ -127,10 +129,48 @@ def git_seed(commit=None):
         git_reset(commit)
 
 
+def get_infra_data():
+    infra_file = posixpath.join(env.app_path_local, '.infra.json')
+    return json.loads(open(infra_file).read())
+
+
+def setup_service_django(service):
+    args = service['args']
+    _name = service['name']
+    service_name = "%s_%s" % (env.app, _name)
+    command = "%s run gunicorn -c guniconfig.py %s %s" % (
+        env.pipenv_path, args['wsgi_app'], args['port'])
+    supervisor_log = posixpath.join(env.log_path, _name + '_supervisor.log')
+    require.supervisor.process(
+        service_name,
+        command=command,
+        directory=env.app_path,
+        # user=env.app_user,
+        user=env.user,
+        stdout_logfile=supervisor_log,
+    )
+    for domain in args['domains']:
+        require.nginx.proxied_site(
+            domain, proxy_url='http://127.0.0.1:%s' % args['port'],
+            docroot=env.app_path,
+        )
+
+
+service_types = {
+    "django": setup_service_django,
+}
+
+
+@task
+def setup_services():
+    data = get_infra_data()
+    for service in data['services']:
+        setup_service = service_types[service['type']]
+        setup_service(service)
+
+
 @task
 def setup():
-    vagrant()
-    transportsimple_server()
     if not hasattr(env, 'app'):
         raise EnvNotSetup("Please setup the env (setup_env)")
     info('Starting Deployment for %s in %s' % (env.app, env.host_string))
@@ -146,3 +186,5 @@ def setup():
     git_seed()
     with cd(env.app_path):
         run("pipenv install")
+        run("pipenv run ./manage.py migrate")
+    setup_services()
