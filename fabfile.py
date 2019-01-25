@@ -1,20 +1,21 @@
 import json
-import posixpath
+from os import listdir
 from pipes import quote
-from os.path import dirname, realpath
+from posixpath import join
+from os.path import dirname, realpath, exists as lexists
 
 from fabric.state import env
 from fabric.contrib.files import exists
-from fabric.api import cd, run, puts, task, lcd, local
 from fabric.colors import blue, green, red, yellow, cyan
+from fabric.api import cd, run, puts, task, lcd, local, abort, sudo
 
 import requests
-from fabtools import user, require
-from fabtools.vagrant import vagrant
+from fabtools import vagrant as _vagrant
+from fabtools import user, require, supervisor, nodejs
 
-vagrant = vagrant  # silence flake8
-
+DATA_FILE = '.infra.json'
 SSH_USERS = ['rs-ds']
+env.projects_path = dirname(dirname(realpath(__file__)))
 
 
 def log(message, wrapper=blue):
@@ -48,20 +49,37 @@ def setup_env(app):
     env.app = app
     env.app_user = app
     env.home_path = user.home_directory(env.user)
-    env.apps_path = posixpath.join(env.home_path, 'apps')
-    env.logs_path = posixpath.join(env.home_path, 'logs')
-    env.envs_path = posixpath.join(env.home_path, 'envs')
-    env.app_path = posixpath.join(env.apps_path, env.app)
-    env.log_path = posixpath.join(env.logs_path, env.app)
-    env.env_path = posixpath.join(env.envs_path, env.app)
-    env.projects_path = dirname(dirname(realpath(__file__)))
-    env.app_path_local = posixpath.join(env.projects_path, env.app)
-    env.pipenv_path = posixpath.join(env.home_path, '.local/bin/pipenv')
+    env.apps_path = join(env.home_path, 'apps')
+    env.logs_path = join(env.home_path, 'logs')
+    env.envs_path = join(env.home_path, 'envs')
+    env.pipenv_path = join(env.home_path, '.local/bin/pipenv')
+    env.app_path = join(env.apps_path, env.app)
+    env.log_path = join(env.logs_path, env.app)
+    env.env_path = join(env.envs_path, env.app)
+    env.app_path_local = join(env.projects_path, env.app)
+    env.infra_file = join(env.app_path_local, DATA_FILE)
 
 
 @task
-def transportsimple_server():
-    setup_env('transportsimple_server')
+def get_apps():
+    apps = []
+    for item in listdir(env.projects_path):
+        infra_file = join(env.projects_path, item, DATA_FILE)
+        if lexists(infra_file):
+            apps.append(item)
+    return apps
+
+
+@task
+def vagrant(app=None):
+    _vagrant.vagrant()
+    env.environment = 'dev'
+    if app is None:
+        apps = get_apps()
+        info("Usage: fab vagrant:<app> deploy")
+        info("Available Apps: %s" % apps)
+        abort("Please specify an app to deploy!")
+    setup_env(app)
 
 
 @task
@@ -71,9 +89,9 @@ def sync_auth_keys():
     """
     if env.user == 'vagrant':
         return error("Did not run sync_auth_keys on vagrant!!! Bad Idea.")
-    ssh_dir = posixpath.join(user.home_directory(env.user), '.ssh')
+    ssh_dir = join(user.home_directory(env.user), '.ssh')
     require.files.directory(ssh_dir, mode='700')
-    authorized_keys_filename = posixpath.join(ssh_dir, 'authorized_keys')
+    authorized_keys_filename = join(ssh_dir, 'authorized_keys')
     require.files.file(
         authorized_keys_filename, mode='600')
     run('cat /dev/null > %s' % quote(authorized_keys_filename))
@@ -116,9 +134,9 @@ def git_reset(commit=None):
         run('git reset --hard %s' % commit)
 
 
-def git_seed(commit=None):
+def git_push(commit=None):
     """
-    seed a git repository (and create if necessary)
+    push to a git repository (or create if necessary)
     """
     git_init()
     with lcd(env.app_path_local):
@@ -130,8 +148,16 @@ def git_seed(commit=None):
 
 
 def get_infra_data():
-    infra_file = posixpath.join(env.app_path_local, '.infra.json')
-    return json.loads(open(infra_file).read())
+    return json.loads(open(env.infra_file).read())
+
+
+def read_environment():
+    env_file = join(
+        env.projects_path, '__KEYS__/%s/%s.env' % (env.app, env.environment))
+    if not lexists(env_file):
+        error('No ENV file: %s' % env_file)
+        return ''
+    return ",".join(open(env_file).readlines())
 
 
 def setup_service_django(service):
@@ -140,11 +166,12 @@ def setup_service_django(service):
     service_name = "%s_%s" % (env.app, _name)
     command = "%s run gunicorn -c guniconfig.py %s %s" % (
         env.pipenv_path, args['wsgi_app'], args['port'])
-    supervisor_log = posixpath.join(env.log_path, _name + '_supervisor.log')
+    supervisor_log = join(env.log_path, _name + '_supervisor.log')
     require.supervisor.process(
         service_name,
         command=command,
         directory=env.app_path,
+        environment=read_environment(),
         # user=env.app_user,
         user=env.user,
         stdout_logfile=supervisor_log,
@@ -156,35 +183,98 @@ def setup_service_django(service):
         )
 
 
-service_types = {
+def setup_service_angular(service):
+    args = service['args']
+    _name = service['name']
+    service_name = "%s_%s" % (env.app, _name)
+    command = "ng build"
+    supervisor_log = join(env.log_path, _name + '_supervisor.log')
+    require.supervisor.process(
+        service_name, command=command, directory=env.app_path,
+        environment=read_environment(), user=env.user, startretries=1,
+        stdout_logfile=supervisor_log, startsecs=0, autorestart=False,
+        # user=env.app_user,
+    )
+    for domain in args['domains']:
+        CONFIG_TPL = '''
+            server {
+                listen      80;
+                server_name %(server_name)s;
+                root        %(docroot)s;
+                access_log  /var/log/nginx/%(server_name)s.log;
+            }'''
+        require.nginx.site(
+            domain, template_contents=CONFIG_TPL, docroot=env.app_path)
+
+
+setup_service = {
     "django": setup_service_django,
+    "angular": setup_service_angular,
 }
 
 
-@task
-def setup_services():
-    data = get_infra_data()
+def setup_services(data):
     for service in data['services']:
-        setup_service = service_types[service['type']]
-        setup_service(service)
+        framework = service['framework']
+        setup_service[framework](service)
+
+
+def ensure_deps_python():
+    require.deb.packages(['python3-pip'])
+    run('pip3 install --user pipenv')
+
+
+def ensure_deps_node():
+    sudo('curl -sL https://deb.nodesource.com/setup_10.x | bash -')
+    require.deb.packages(['nodejs'])
+    for package in ['yarn', '@angular/cli']:
+        nodejs.install_package(package)
+
+
+ensure_deps = {
+    'python': ensure_deps_python,
+    'node': ensure_deps_node,
+}
+
+
+def ensure_packages_python():
+    run("pipenv install")
+    run("pipenv run ./manage.py migrate")
+
+
+def ensure_packages_node():
+    nodejs.install_dependencies(npm='yarn')
+
+
+ensure_packages = {
+    'python': ensure_packages_python,
+    'node': ensure_packages_node,
+}
 
 
 @task
 def setup():
     if not hasattr(env, 'app'):
         raise EnvNotSetup("Please setup the env (setup_env)")
+    data = get_infra_data()
+    language = data['language']
     info('Starting Deployment for %s in %s' % (env.app, env.host_string))
     require.deb.uptodate_index()
-    require.deb.packages(['python3-pip'])
-    run('pip3 install --user pipenv')
+    ensure_deps[language]()
     require.users.user(env.app_user, system=True)
-    require.files.directories([
-        env.app_path,
-        env.log_path,
-        env.env_path,
-    ])
-    git_seed()
+    require.files.directories([env.app_path, env.log_path, env.env_path])
+    git_push()
     with cd(env.app_path):
-        run("pipenv install")
-        run("pipenv run ./manage.py migrate")
-    setup_services()
+        ensure_packages[language]()
+    setup_services(data)
+
+
+@task
+def deploy():
+    git_push()
+    supervisor.reload_config()
+
+
+@task
+def echo_test():
+    _vagrant.vagrant()
