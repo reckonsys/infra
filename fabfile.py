@@ -91,6 +91,7 @@ def setup_env():
     env.app_path = join(env.apps_path, env.app)
     env.log_path = join(env.logs_path, env.app)
     env.env_path = join(env.envs_path, env.app)
+    return data
 
 
 @task
@@ -304,8 +305,7 @@ def ensure_packages(language):
 @task
 def setup():
     info('Starting Deployment for %s in %s' % (env.app, env.host_string))
-    setup_env()
-    data = get_infra_data()
+    data = setup_env()
     language = data['language']
     info('Starting Deployment for %s in %s' % (env.app, env.host_string))
     require.deb.uptodate_index()
