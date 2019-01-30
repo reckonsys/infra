@@ -20,6 +20,44 @@ DATA_FILE = '.infra.json'
 SSH_USERS = ['rs-ds']
 env.projects_path = dirname(dirname(realpath(__file__)))
 
+NGX_STATIC_TPL = '''
+server {
+    listen 80;
+    index index.html;
+    server_name %(server_name)s;
+    root %(var_static_app)s;
+    access_log /var/log/nginx/%(server_name)s-access.log;
+    error_log /var/log/nginx/%(server_name)s-error.log;
+
+    location / {
+        # try_files $uri $uri/ /index.html;
+    }
+
+    %(extra_ngx_config)s
+}
+'''
+
+NGX_SERVER_TPL = """
+server {
+    listen 80;
+    server_name %(server_name)s;
+    gzip_vary on;
+    root %(var_static_app)s;
+    try_files $uri @proxied;
+    error_log /var/log/nginx/%(server_name)s-access.log;
+    access_log /var/log/nginx/%(server_name)s-error.log;
+
+    location @proxied {
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header Host $http_host;
+        proxy_redirect off;
+        proxy_pass %(proxy_url)s;
+    }
+
+    %(extra_ngx_config)s
+}
+"""
+
 
 def log(message, wrapper=blue):
     return puts(wrapper(message))
@@ -83,14 +121,15 @@ def setup_env():
     env.user = host['user']
     env.app_user = env.user
     env.host_string = '%s@%s' % (host['user'], host['host'])
+    env.var_static_app = join('/var/static', env.app)
     env.home_path = user.home_directory(env.user)
     env.apps_path = join(env.home_path, 'apps')
-    env.logs_path = join(env.home_path, 'logs')
-    env.envs_path = join(env.home_path, 'envs')
+    # env.logs_path = join(env.home_path, 'logs')
+    env.logs_path = '/var/log'
+    env.app_logs_path = join(env.logs_path, env.app)
     env.pipenv_path = join(env.home_path, '.local/bin/pipenv')
     env.app_path = join(env.apps_path, env.app)
     env.log_path = join(env.logs_path, env.app)
-    env.env_path = join(env.envs_path, env.app)
     return data
 
 
@@ -206,12 +245,13 @@ def supervisor_process(name, **kwargs):
 
 
 def setup_service_django(service):
-    args = service['args']
     _name = service['name']
+    args = service['args'][env.environment]
     service_name = "%s_%s" % (env.app, _name)
     command = "%s run gunicorn -c guniconfig.py %s %s" % (
         env.pipenv_path, args['wsgi_app'], args['port'])
-    supervisor_log = join(env.log_path, _name + '_supervisor.log')
+    stderr_logfile = join(env.log_path, _name + '_supervisor_error.log')
+    stdout_logfile = join(env.log_path, _name + '_supervisor_access.log')
     supervisor_process(
         service_name,
         command=command,
@@ -219,36 +259,36 @@ def setup_service_django(service):
         environment=read_environment(),
         # user=env.app_user,
         user=env.user,
-        stdout_logfile=supervisor_log,
+        stdout_logfile=stdout_logfile,
+        stderr_logfile=stderr_logfile
     )
     for domain in args['domains']:
-        require.nginx.proxied_site(
+        require.nginx.site(
             domain, proxy_url='http://127.0.0.1:%s' % args['port'],
-            docroot=env.app_path,
+            docroot=env.app_path, template_contents=NGX_SERVER_TPL,
+            var_static_app=env.var_static_app,
+            extra_ngx_config=service.get('extra_ngx_config', '')
         )
 
 
 def setup_service_angular(service):
-    args = service['args']
     _name = service['name']
+    command = "yarn build-var"
+    args = service['args'][env.environment]
     service_name = "%s_%s" % (env.app, _name)
-    command = "ng build --prod --output-path dist"
-    supervisor_log = join(env.log_path, _name + '_supervisor.log')
+    stderr_logfile = join(env.log_path, _name + '_supervisor_error.log')
+    stdout_logfile = join(env.log_path, _name + '_supervisor_access.log')
     supervisor_process(
         service_name, command=command, directory=env.app_path,
         environment=read_environment(), user=env.user, startretries=1,
-        stdout_logfile=supervisor_log, startsecs=0, autorestart=False,
+        stdout_logfile=stdout_logfile, startsecs=0, autorestart=False,
+        stderr_logfile=stderr_logfile
     )
     for domain in args['domains']:
-        CONFIG_TPL = '''
-            server {
-                listen      80;
-                server_name %(server_name)s;
-                root        %(docroot)s/dist;
-                access_log  /var/log/nginx/%(server_name)s.log;
-            }'''
         require.nginx.site(
-            domain, template_contents=CONFIG_TPL, docroot=env.app_path)
+            domain, template_contents=NGX_STATIC_TPL, docroot=env.app_path,
+            extra_ngx_config=service.get('extra_ngx_config', ''),
+            var_static_app=env.var_static_app)
 
 
 def setup_service(framework, service):
@@ -312,7 +352,9 @@ def setup():
     require.deb.packages(['supervisor'])
     ensure_deps(language)
     require.users.user(env.app_user, system=True)
-    require.files.directories([env.app_path, env.log_path, env.env_path])
+    require.files.directories([
+        env.app_path, env.var_static_app, env.app_logs_path])
+    require.file('/var/.htpasswd', source='.htpasswd')
     git_push()
     with cd(env.app_path):
         ensure_packages(language)
