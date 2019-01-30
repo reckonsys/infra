@@ -148,8 +148,8 @@ def staging():
 
 
 @task
-def transportsimple_server():
-    env.app = 'transportsimple_server'
+def transportsimple():
+    env.app = 'transportsimple'
 
 
 @task
