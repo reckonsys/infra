@@ -47,6 +47,10 @@ server {
     error_log /var/log/nginx/%(server_name)s-access.log;
     access_log /var/log/nginx/%(server_name)s-error.log;
 
+    location /static {
+        alias %(var_static_app)s;
+    }
+
     location @proxied {
         proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
         proxy_set_header Host $http_host;
