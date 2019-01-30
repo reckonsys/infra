@@ -17,7 +17,7 @@ from fabtools import user, require, supervisor, nodejs, service as ft_service
 
 
 DATA_FILE = '.infra.json'
-SSH_USERS = ['rs-ds']
+SSH_USERS = ['dhilipsiva', 'rs-ds', 'jinchuuriki91', 'aadil-reckonsys']
 env.projects_path = dirname(dirname(realpath(__file__)))
 
 NGX_STATIC_TPL = '''
