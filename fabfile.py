@@ -13,7 +13,7 @@ from fabric.api import (
 import requests
 from fabtools.files import watch
 from fabtools.utils import run_as_root
-from fabtools import user, require, supervisor, nodejs
+from fabtools import user, require, supervisor, nodejs, service as ft_service
 
 
 DATA_FILE = '.infra.json'
@@ -276,18 +276,7 @@ def setup_service_django(service):
 
 
 def setup_service_angular(service):
-    _name = service['name']
-    command = "yarn build-var"
     args = service['args'][env.environment]
-    service_name = "%s_%s" % (env.app, _name)
-    stderr_logfile = join(env.log_path, _name + '_supervisor_error.log')
-    stdout_logfile = join(env.log_path, _name + '_supervisor_access.log')
-    supervisor_process(
-        service_name, command=command, directory=env.app_path,
-        environment=read_environment(), user=env.user, startretries=1,
-        stdout_logfile=stdout_logfile, startsecs=0, autorestart=False,
-        stderr_logfile=stderr_logfile
-    )
     for domain in args['domains']:
         require.nginx.site(
             domain, template_contents=NGX_STATIC_TPL, docroot=env.app_path,
@@ -331,7 +320,6 @@ def ensure_deps(language):
 
 def ensure_packages_python():
     run("%s install -d" % env.pipenv_path)
-    run("%s run ./manage.py migrate" % env.pipenv_path)
 
 
 def ensure_packages_node():
@@ -344,6 +332,24 @@ def ensure_packages(language):
         'node': ensure_packages_node,
     }.get(language)
     return _ensure_packages()
+
+
+def one_offs_python():
+    run("%s run ./manage.py migrate" % env.pipenv_path)
+    # run("%s run ./manage.py seed_db" % env.pipenv_path)
+    run("%s run ./manage.py collectstatic" % env.pipenv_path)
+
+
+def one_offs_node():
+    run("yarn build-var")
+
+
+def one_offs(language):
+    _one_offs = {
+        'python': one_offs_python,
+        'node': one_offs_node,
+    }.get(language)
+    return _one_offs
 
 
 @task
@@ -362,14 +368,21 @@ def setup():
     git_push()
     with cd(env.app_path):
         ensure_packages(language)
+        one_offs(language)
     setup_services(data)
 
 
 @task
 def deploy():
-    setup_env()
+    data = setup_env()
+    language = data['language']
     git_push()
-    supervisor.reload_config()
+    with cd(env.app_path):
+        ensure_packages(language)
+        one_offs(language)
+    supervisor.update_config()
+    supervisor.restart_process('all')
+    ft_service.restart('nginx')
 
 
 @task
