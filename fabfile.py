@@ -248,7 +248,8 @@ def read_environment():
     if not lexists(env_file):
         error('No ENV file: %s' % env_file)
         return ''
-    return ",".join(open(env_file).readlines())
+    lines = [line.strip() for line in open(env_file).readlines()]
+    return ",".join(lines)
 
 
 def supervisor_process(name, **kwargs):
