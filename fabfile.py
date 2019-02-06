@@ -23,14 +23,15 @@ env.projects_path = dirname(dirname(realpath(__file__)))
 NGX_STATIC_TPL = '''
 server {
     listen 80;
-    index index.html;
     server_name %(server_name)s;
-    root %(var_static_app)s;
     access_log /var/log/nginx/%(server_name)s-access.log;
     error_log /var/log/nginx/%(server_name)s-error.log;
+    root %(var_static_app)s;
+    index index.html;
+    # autoindex on;
 
     location / {
-        # try_files $uri $uri/ /index.html;
+        try_files $uri $uri/ /index.html;
     }
 
     %(extra_ngx_config)s
@@ -41,14 +42,16 @@ NGX_SERVER_TPL = """
 server {
     listen 80;
     server_name %(server_name)s;
-    gzip_vary on;
-    root %(var_static_app)s;
-    try_files $uri @proxied;
     error_log /var/log/nginx/%(server_name)s-access.log;
     access_log /var/log/nginx/%(server_name)s-error.log;
 
-    location /static {
-        alias %(var_static_app)s;
+    location / {
+        try_files $uri @proxied;
+    }
+
+    location /static/ {
+        alias %(var_static_app)s/;
+        autoindex on;
     }
 
     location @proxied {
@@ -341,7 +344,7 @@ def one_offs_python():
 
 
 def one_offs_node():
-    run("yarn build-var")
+    run("yarn build:%s" % env.environment)
 
 
 def one_offs(language):
