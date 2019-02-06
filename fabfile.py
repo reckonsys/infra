@@ -240,8 +240,11 @@ def get_infra_data():
 
 
 def read_environment():
-    env_file = join(
-        env.projects_path, '__KEYS__/%s/%s.env' % (env.app, env.environment))
+    if env.environment == 'prod':
+        path = '__KEYS__/%s/%s.env' % (env.app, env.environment)
+    else:
+        path = '%s/envs/%s.env' % (env.app, env.environment)
+    env_file = join(env.projects_path, path)
     if not lexists(env_file):
         error('No ENV file: %s' % env_file)
         return ''
