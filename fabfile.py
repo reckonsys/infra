@@ -161,6 +161,16 @@ def transportsimple_web():
 
 
 @task
+def golden_sherpa():
+    env.app = 'golden_sherpa'
+
+
+@task
+def golden_sherpa_client():
+    env.app = 'golden_sherpa_client'
+
+
+@task
 def sync_auth_keys():
     """
     Add multiple public keys to the user's authorized SSH keys from GitHub.
