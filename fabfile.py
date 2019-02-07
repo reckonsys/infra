@@ -21,7 +21,8 @@ confs = Environment(loader=FileSystemLoader('confs'))
 
 DATA_FILE = '.infra.json'
 SSH_USERS = [
-    'dhilipsiva', 'rs-ds', 'jinchuuriki91', 'aadil-reckonsys', 'govindsharma7']
+    'dhilipsiva', 'rs-ds', 'jinchuuriki91', 'aadil-reckonsys', 'govindsharma7',
+    'gururaj26']
 env.projects_path = dirname(dirname(realpath(__file__)))
 
 nginx_client = confs.get_template('nginx_client.conf')
@@ -251,8 +252,9 @@ def setup_service_django(service):
 def setup_service_angular(service):
     _env = env.infra_data['hosts'][env.environment]
     for domain in _env['domains']:
+        template = nginx_client.render()
         require.nginx.site(
-            domain, template_contents=nginx_client, docroot=env.app_path,
+            domain, template_contents=template, docroot=env.app_path,
             extra_ngx_config=service.get('extra_ngx_config', ''),
             var_static_app=env.var_static_app)
 
