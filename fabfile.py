@@ -4,67 +4,28 @@ from pipes import quote
 from posixpath import join
 from os.path import dirname, realpath, exists as lexists
 
+import requests
+from jinja2 import Environment, FileSystemLoader
+
 from fabric.state import env
 from fabric.contrib.files import exists
 from fabric.colors import blue, green, red, yellow, cyan
 from fabric.api import (
     cd, run, puts, task, lcd, local, abort, sudo, hide, settings)
 
-import requests
 from fabtools.files import watch
 from fabtools.utils import run_as_root
 from fabtools import user, require, supervisor, nodejs, service as ft_service
 
+confs = Environment(loader=FileSystemLoader('confs'))
 
 DATA_FILE = '.infra.json'
 SSH_USERS = [
     'dhilipsiva', 'rs-ds', 'jinchuuriki91', 'aadil-reckonsys', 'govindsharma7']
 env.projects_path = dirname(dirname(realpath(__file__)))
 
-NGX_STATIC_TPL = '''
-server {
-    listen 80;
-    server_name %(server_name)s;
-    access_log /var/log/nginx/%(server_name)s-access.log;
-    error_log /var/log/nginx/%(server_name)s-error.log;
-    root %(var_static_app)s;
-    index index.html;
-    # autoindex on;
-
-    location / {
-        try_files $uri $uri/ /index.html;
-    }
-
-    %(extra_ngx_config)s
-}
-'''
-
-NGX_SERVER_TPL = """
-server {
-    listen 80;
-    server_name %(server_name)s;
-    error_log /var/log/nginx/%(server_name)s-access.log;
-    access_log /var/log/nginx/%(server_name)s-error.log;
-
-    location / {
-        try_files $uri @proxied;
-    }
-
-    location /static/ {
-        alias %(var_static_app)s/;
-        autoindex on;
-    }
-
-    location @proxied {
-        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
-        proxy_set_header Host $http_host;
-        proxy_redirect off;
-        proxy_pass %(proxy_url)s;
-    }
-
-    %(extra_ngx_config)s
-}
-"""
+nginx_client = confs.get_template('nginx_client.conf')
+nginx_django = confs.get_template('nginx_django.conf')
 
 
 def log(message, wrapper=blue):
@@ -123,22 +84,22 @@ def setup_env():
         raise EnvNotSetup("Please specify app and environment")
         abort("")
     env.app_path_local = join(env.projects_path, env.app)
-    env.infra_file = join(env.app_path_local, DATA_FILE)
-    data = get_infra_data()
-    host = data["hosts"][env.environment]
-    env.user = host['user']
+    infra_file = join(env.app_path_local, DATA_FILE)
+    env.infra_data = json.loads(open(infra_file).read())
+    host = env.infra_data["hosts"][env.environment]
+    env.user = host.get('user', 'root')
+    ssh_port = host.get('ssh_port', 22)
+    first_host = host['domains'][0]
     env.app_user = env.user
-    env.host_string = '%s@%s' % (host['user'], host['host'])
+    env.host_string = '%s@%s:%s' % (env.user, first_host, ssh_port)
     env.var_static_app = join('/var/static', env.app)
     env.home_path = user.home_directory(env.user)
     env.apps_path = join(env.home_path, 'apps')
-    # env.logs_path = join(env.home_path, 'logs')
     env.logs_path = '/var/log'
     env.app_logs_path = join(env.logs_path, env.app)
     env.pipenv_path = join(env.home_path, '.local/bin/pipenv')
     env.app_path = join(env.apps_path, env.app)
     env.log_path = join(env.logs_path, env.app)
-    return data
 
 
 @task
@@ -235,10 +196,6 @@ def git_push(commit=None):
         git_reset(commit)
 
 
-def get_infra_data():
-    return json.loads(open(env.infra_file).read())
-
-
 def read_environment():
     if env.environment == 'prod':
         path = '__KEYS__/%s/%s.env' % (env.app, env.environment)
@@ -252,57 +209,56 @@ def read_environment():
     return ",".join(lines)
 
 
-def supervisor_process(name, **kwargs):
+def supervisor_process(service):
     lines = []
-    params = {}
-    params.update(kwargs)
-    params.setdefault('autorestart', 'true')
-    params.setdefault('redirect_stderr', 'true')
-    lines.append('[program:%(name)s]' % locals())
+    _name = service['name']
+    args = service['args']
+    service_name = "%s_%s" % (env.app, _name)
+    wsgi_app = args.get('wsgi_app', _name)
+    wsgi_app = "%s.wsgi:application" % _name
+    command = "%s run gunicorn -c guniconfig.py %s %s" % (
+        env.pipenv_path, wsgi_app, args['port'])
+    stderr_logfile = join(env.log_path, _name + '_supervisor_error.log')
+    stdout_logfile = join(env.log_path, _name + '_supervisor_access.log')
+    params = dict(
+        command=command, directory=env.app_path, stderr_logfile=stderr_logfile,
+        environment=read_environment(), stdout_logfile=stdout_logfile,
+        autorestart=args.get('autorestart', 'true'),
+        redirect_stderr=args.get('redirect_stderr', 'true'),
+        # user=env.app_user,
+    )
+    lines.append('[program:%(service_name)s]' % locals())
     for key, value in sorted(params.items()):
         lines.append("%s=%s" % (key, value))
-    filename = '/etc/supervisor/conf.d/%(name)s.conf' % locals()
+    filename = '/etc/supervisor/conf.d/%(service_name)s.conf' % locals()
     with watch(filename, callback=supervisor.update_config, use_sudo=True):
         require.file(filename, contents='\n'.join(lines), use_sudo=True)
 
 
 def setup_service_django(service):
-    _name = service['name']
-    args = service['args'][env.environment]
-    service_name = "%s_%s" % (env.app, _name)
-    command = "%s run gunicorn -c guniconfig.py %s %s" % (
-        env.pipenv_path, args['wsgi_app'], args['port'])
-    stderr_logfile = join(env.log_path, _name + '_supervisor_error.log')
-    stdout_logfile = join(env.log_path, _name + '_supervisor_access.log')
-    supervisor_process(
-        service_name,
-        command=command,
-        directory=env.app_path,
-        environment=read_environment(),
-        # user=env.app_user,
-        user=env.user,
-        stdout_logfile=stdout_logfile,
-        stderr_logfile=stderr_logfile
-    )
-    for domain in args['domains']:
+    supervisor_process(service)
+    args = service['args']
+    _env = env.infra_data['hosts'][env.environment]
+    for domain in _env['domains']:
+        template = nginx_django.render()
         require.nginx.site(
             domain, proxy_url='http://127.0.0.1:%s' % args['port'],
-            docroot=env.app_path, template_contents=NGX_SERVER_TPL,
+            docroot=env.app_path, template_contents=template,
             var_static_app=env.var_static_app,
-            extra_ngx_config=service.get('extra_ngx_config', '')
         )
 
 
 def setup_service_angular(service):
-    args = service['args'][env.environment]
-    for domain in args['domains']:
+    _env = env.infra_data['hosts'][env.environment]
+    for domain in _env['domains']:
         require.nginx.site(
-            domain, template_contents=NGX_STATIC_TPL, docroot=env.app_path,
+            domain, template_contents=nginx_client, docroot=env.app_path,
             extra_ngx_config=service.get('extra_ngx_config', ''),
             var_static_app=env.var_static_app)
 
 
-def setup_service(framework, service):
+def setup_service(service):
+    framework = service['framework']
     _setup_service = {
         "django": setup_service_django,
         "angular": setup_service_angular,
@@ -310,10 +266,9 @@ def setup_service(framework, service):
     return _setup_service(service)
 
 
-def setup_services(data):
-    for service in data['services']:
-        framework = service['framework']
-        setup_service(framework, service)
+def setup_services():
+    for service in env.infra_data['services']:
+        setup_service(service)
 
 
 def ensure_deps_python():
@@ -328,7 +283,8 @@ def ensure_deps_node():
         nodejs.install_package(package)
 
 
-def ensure_deps(language):
+def ensure_deps():
+    language = env.infra_data['language']
     _ensure_deps = {
         'python': ensure_deps_python,
         'node': ensure_deps_node,
@@ -344,7 +300,8 @@ def ensure_packages_node():
     nodejs.install_dependencies(npm='yarn')
 
 
-def ensure_packages(language):
+def ensure_packages():
+    language = env.infra_data['language']
     _ensure_packages = {
         'python': ensure_packages_python,
         'node': ensure_packages_node,
@@ -362,7 +319,8 @@ def one_offs_node():
     run("yarn build:%s" % env.environment)
 
 
-def one_offs(language):
+def one_offs():
+    language = env.infra_data['language']
     _one_offs = {
         'python': one_offs_python,
         'node': one_offs_node,
@@ -371,39 +329,53 @@ def one_offs(language):
 
 
 @task
+def setup_certbot():
+    setup_env()
+    require.deb.uptodate_index()
+    require.deb.packages(['software-properties-common'])
+    sudo('add-apt-repository universe')
+    sudo('add-apt-repository ppa:certbot/certbot')
+    require.deb.uptodate_index()
+    sudo('apt-get install certbot python-certbot-nginx')
+    sudo('certbot --nginx')
+
+
+@task
 def setup():
-    info('Starting Deployment for %s in %s' % (env.app, env.host_string))
-    data = setup_env()
-    language = data['language']
-    info('Starting Deployment for %s in %s' % (env.app, env.host_string))
+    setup_env()
+    info('[setup] Starting Setup: %s -> %s' % (env.app, env.host_string))
     require.deb.uptodate_index()
     require.deb.packages(['supervisor'])
-    ensure_deps(language)
+    ensure_deps()
     require.users.user(env.app_user, system=True)
     require.files.directories([
         env.app_path, env.var_static_app, env.app_logs_path])
     require.file('/var/.htpasswd', source='.htpasswd')
     git_push()
     with cd(env.app_path):
-        ensure_packages(language)
-        one_offs(language)
-    setup_services(data)
+        ensure_packages()
+        one_offs()
+    setup_services()
+    success('[setup] Finished Setup: %s -> %s' % (env.app, env.host_string))
 
 
 @task
 def deploy():
-    data = setup_env()
-    language = data['language']
+    setup_env()
+    info('[deploy] Starting Deploy: %s -> %s' % (env.app, env.host_string))
     git_push()
     with cd(env.app_path):
-        ensure_packages(language)
-        one_offs(language)
+        ensure_packages()
+        one_offs()
     supervisor.update_config()
     supervisor.restart_process('all')
     ft_service.restart('nginx')
+    success('[deploy] Finished Deploy: %s -> %s' % (env.app, env.host_string))
 
 
 @task
 def ping():
     setup_env()
+    info('[ping] Starting Ping: %s -> %s' % (env.app, env.host_string))
     run("echo pong")
+    success('[ping] Finished Ping: %s -> %s' % (env.app, env.host_string))
