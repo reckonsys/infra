@@ -216,10 +216,14 @@ def supervisor_process(service):
     _name = service['name']
     args = service['args']
     service_name = "%s_%s" % (env.app, _name)
-    wsgi_app = args.get('wsgi_app', _name)
-    wsgi_app = "%s.wsgi:application" % _name
-    command = "%s run gunicorn -c guniconfig.py %s %s" % (
-        env.pipenv_path, wsgi_app, args['port'])
+    if service['framework'] == 'django':
+        wsgi_app = args.get('wsgi_app', _name)
+        wsgi_app = "%s.wsgi:application" % _name
+        command = "%s run gunicorn -c guniconfig.py %s %s" % (
+            env.pipenv_path, wsgi_app, args['port'])
+    if service['framework'] == 'celery':
+        command = '%s run celery -A %s worker --loglevel=info -E --concurrency=10' % (  # NOQA
+            env.pipenv_path, env.app)
     stderr_logfile = join(env.log_path, _name + '_supervisor_error.log')
     stdout_logfile = join(env.log_path, _name + '_supervisor_access.log')
     params = dict(
@@ -250,6 +254,10 @@ def setup_service_django(service):
         )
 
 
+def setup_service_celery(service):
+    supervisor_process(service)
+
+
 def setup_service_angular(service):
     _env = env.infra_data['hosts'][env.environment]
     for domain in _env['domains']:
@@ -264,6 +272,7 @@ def setup_service(service):
     framework = service['framework']
     _setup_service = {
         "django": setup_service_django,
+        "celery": setup_service_celery,
         "angular": setup_service_angular,
     }.get(framework)
     return _setup_service(service)
@@ -347,6 +356,7 @@ def setup_certbot():
 def setup():
     setup_env()
     info('[setup] Starting Setup: %s -> %s' % (env.app, env.host_string))
+    '''
     require.deb.uptodate_index()
     require.deb.packages(['supervisor'])
     ensure_deps()
@@ -358,6 +368,8 @@ def setup():
     with cd(env.app_path):
         ensure_packages()
         one_offs()
+    '''
+    require.redis.instance('0')
     setup_services()
     success('[setup] Finished Setup: %s -> %s' % (env.app, env.host_string))
 
@@ -381,4 +393,5 @@ def ping():
     setup_env()
     info('[ping] Starting Ping: %s -> %s' % (env.app, env.host_string))
     run("echo pong")
+    require.redis.instance('0')
     success('[ping] Finished Ping: %s -> %s' % (env.app, env.host_string))
