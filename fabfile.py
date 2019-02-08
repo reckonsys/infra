@@ -140,6 +140,7 @@ def sync_auth_keys():
     """
     if env.user == 'vagrant':
         return error("Did not run sync_auth_keys on vagrant!!! Bad Idea.")
+    setup_env()
     ssh_dir = join(user.home_directory(env.user), '.ssh')
     require.files.directory(ssh_dir, mode='700')
     authorized_keys_filename = join(ssh_dir, 'authorized_keys')
