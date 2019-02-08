@@ -360,8 +360,9 @@ def setup_postgres():
     dbuser = prompt("Please enter a username:")
     password = prompt("Please enter the password:")
     dbname = prompt("Please enter the DB name:")
+    require.files.directory('/var/lib/locales/supported.d/')
     require.postgres.server()
-    require.postgres.user(dbuser, password=password)
+    require.postgres.user(dbuser, password=password, encrypted_password=True)
     require.postgres.database(dbname, owner=dbuser)
 
 
