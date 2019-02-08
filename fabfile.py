@@ -2,6 +2,7 @@ import json
 from os import listdir
 from pipes import quote
 from posixpath import join
+from functools import wraps
 from os.path import dirname, realpath, exists as lexists
 
 import requests
@@ -9,6 +10,7 @@ from dotenv import dotenv_values
 from jinja2 import Environment, FileSystemLoader
 
 from fabric.state import env
+from fabric.operations import prompt
 from fabric.contrib.files import exists
 from fabric.context_managers import shell_env
 from fabric.colors import blue, green, red, yellow, cyan
@@ -52,6 +54,18 @@ def warn(message):
 
 def error(message):
     return log(message, red)
+
+
+def track(function):
+    """
+    Tracker
+    """
+    @wraps(function)
+    def wrapper(*args, **kwargs):
+        info('[%s] Entered' % function.__name__)
+        return function(*args, **kwargs)
+        success('[%s] Exited' % function.__name__)
+    return wrapper
 
 
 @task
@@ -339,6 +353,15 @@ def setup_certbot():
 @task
 def setup_redis():
     require.redis.instance('0')
+
+
+@task
+def setup_postgres():
+    dbuser = prompt("Please enter a username:")
+    password = prompt("Please enter the password:")
+    dbname = prompt("Please enter the DB name:")
+    require.postgres.user(dbuser, password=password)
+    require.postgres.database(dbname, owner=dbuser)
 
 
 @task
