@@ -88,9 +88,10 @@ def setup_shell_envs():
     env_file = join(env.projects_path, path)
     if not lexists(env_file):
         return error('No ENV file: %s' % env_file)
-    lines = [line.strip() for line in open(env_file).readlines()]
-    env.shell_envs_supervisor = ','.join(lines)
     env.shell_envs_dict.update(dotenv_values(env_file))
+    lines = [
+        '%s="%s"' % (key, value) for key, value in env.shell_envs_dict.items()]
+    env.shell_envs_supervisor = ','.join(lines)
 
 
 def setup_env(environment, app):
