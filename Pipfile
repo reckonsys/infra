@@ -11,6 +11,7 @@ fabtools = "*"
 requests = "*"
 gunicorn = "*"
 jinja2 = "*"
+python-dotenv = "*"
 
 [requires]
 python_version = "2.7"

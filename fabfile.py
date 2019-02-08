@@ -5,28 +5,33 @@ from posixpath import join
 from os.path import dirname, realpath, exists as lexists
 
 import requests
+from dotenv import dotenv_values
 from jinja2 import Environment, FileSystemLoader
 
 from fabric.state import env
 from fabric.contrib.files import exists
+from fabric.context_managers import shell_env
 from fabric.colors import blue, green, red, yellow, cyan
-from fabric.api import (
-    cd, run, puts, task, lcd, local, abort, sudo, hide, settings)
+from fabric.api import cd, run, puts, task, lcd, local, abort, sudo
 
 from fabtools.files import watch
-from fabtools.utils import run_as_root
 from fabtools import user, require, supervisor, nodejs, service as ft_service
 
-confs = Environment(loader=FileSystemLoader('confs'))
-
+DEV = 'dev'
+STAG = 'stag'
+PROD = 'prod'
 DATA_FILE = '.infra.json'
+confs = Environment(loader=FileSystemLoader('confs'))
+nginx_client = confs.get_template('nginx_client.conf')
+nginx_django = confs.get_template('nginx_django.conf')
+env.projects_path = dirname(dirname(realpath(__file__)))
 SSH_USERS = [
     'dhilipsiva', 'rs-ds', 'jinchuuriki91', 'aadil-reckonsys', 'govindsharma7',
     'gururaj26']
-env.projects_path = dirname(dirname(realpath(__file__)))
 
-nginx_client = confs.get_template('nginx_client.conf')
-nginx_django = confs.get_template('nginx_django.conf')
+
+class EnvNotSetup(Exception):
+    pass
 
 
 def log(message, wrapper=blue):
@@ -49,10 +54,6 @@ def error(message):
     return log(message, red)
 
 
-class EnvNotSetup(Exception):
-    pass
-
-
 @task
 def list_apps():
     apps = []
@@ -60,34 +61,38 @@ def list_apps():
         infra_file = join(env.projects_path, item, DATA_FILE)
         if lexists(infra_file):
             apps.append(item)
-    info("Available Apps: %s" % apps)
+    info('Available Apps: %s' % apps)
 
 
-def process_status(name):
-    """
-    Get the status of a supervisor process.
-    """
-    with settings(
-            hide('running', 'stdout', 'stderr', 'warnings'), warn_only=True):
-        res = run_as_root(
-            "supervisorctl --no-pager status %(name)s" % locals())
-        if res.startswith("No such process"):
-            return None
-        else:
-            return res.split()[1]
+def setup_shell_envs():
+    if env.environment == 'prod':
+        path = '__KEYS__/%s/%s.env' % (env.app, env.environment)
+    else:
+        path = '%s/envs/%s.env' % (env.app, env.environment)
+    env_file = join(env.projects_path, path)
+    if not lexists(env_file):
+        env.shell_envs_supervisor = ''
+        env.shell_envs_dict = {}
+        return error('No ENV file: %s' % env_file)
+    lines = [line.strip() for line in open(env_file).readlines()]
+    env.shell_envs_supervisor = ','.join(lines)
+    env.shell_envs_dict = dotenv_values(env_file)
 
 
-def setup_env():
+def setup_env(environment, app):
     '''
     Setup environment
     '''
-    if not (hasattr(env, 'app') and hasattr(env, 'environment')):
-        raise EnvNotSetup("Please specify app and environment")
-        abort("")
+    if app is None:
+        list_apps()
+        raise EnvNotSetup('Please specify app')
+        abort('')
+    env.app = app
+    env.environment = environment
     env.app_path_local = join(env.projects_path, env.app)
     infra_file = join(env.app_path_local, DATA_FILE)
     env.infra_data = json.loads(open(infra_file).read())
-    host = env.infra_data["hosts"][env.environment]
+    host = env.infra_data['hosts'][env.environment]
     env.user = host.get('user', 'root')
     ssh_port = host.get('ssh_port', 22)
     first_host = host['domains'][0]
@@ -101,71 +106,56 @@ def setup_env():
     env.pipenv_path = join(env.home_path, '.local/bin/pipenv')
     env.app_path = join(env.apps_path, env.app)
     env.log_path = join(env.logs_path, env.app)
+    setup_shell_envs()
 
 
 @task
 def vagrant(app=None):
-    env.environment = 'dev'
+    setup_env(DEV, app)
 
 
 @task
-def staging():
-    env.environment = 'stag'
+def stag(app=None):
+    setup_env(STAG, app)
 
 
 @task
-def transportsimple():
-    env.app = 'transportsimple'
-
-
-@task
-def transportsimple_web():
-    env.app = 'transportsimple_web'
-
-
-@task
-def golden_sherpa():
-    env.app = 'golden_sherpa'
-
-
-@task
-def golden_sherpa_client():
-    env.app = 'golden_sherpa_client'
+def prod(app=None):
+    setup_env(PROD, app)
 
 
 @task
 def sync_auth_keys():
-    """
+    '''
     Add multiple public keys to the user's authorized SSH keys from GitHub.
-    """
+    '''
     if env.user == 'vagrant':
-        return error("Did not run sync_auth_keys on vagrant!!! Bad Idea.")
-    setup_env()
+        return error('Did not run sync_auth_keys on vagrant!!! Bad Idea.')
     ssh_dir = join(user.home_directory(env.user), '.ssh')
     require.files.directory(ssh_dir, mode='700')
     authorized_keys_filename = join(ssh_dir, 'authorized_keys')
     require.files.file(authorized_keys_filename, mode='600')
     run('cat /dev/null > %s' % quote(authorized_keys_filename))
-    info("Fetching public keys from GitHub")
+    info('Fetching public keys from GitHub')
     for gh_user in SSH_USERS:
-        r = requests.get("https://api.github.com/users/%s/keys" % gh_user)
+        r = requests.get('https://api.github.com/users/%s/keys' % gh_user)
         for key in r.json():
-            run("echo %s >> %s"
-                % (quote(key["key"]), quote(authorized_keys_filename)))
-    success("Public keys synced")
+            run('echo %s >> %s'
+                % (quote(key['key']), quote(authorized_keys_filename)))
+    success('Public keys synced')
 
 
 def git_head_rev():
-    """
+    '''
     find the commit that is currently checked out
-    """
+    '''
     return local('git rev-parse HEAD', capture=True)
 
 
 def git_init():
-    """
+    '''
     create a git repository if necessary
-    """
+    '''
     if exists('%s/.git' % env.app_path):
         return
     info('Creating new git repository ' + env.app_path)
@@ -176,9 +166,9 @@ def git_init():
 
 
 def git_reset(commit=None):
-    """
+    '''
     reset the working directory to a specific commit [remote]
-    """
+    '''
     with cd(env.app_path):
         commit = commit or git_head_rev()
         info('Resetting to commit ' + commit)
@@ -186,9 +176,9 @@ def git_reset(commit=None):
 
 
 def git_push(commit=None):
-    """
+    '''
     push to a git repository (or create if necessary)
-    """
+    '''
     git_init()
     with lcd(env.app_path_local):
         commit = commit or git_head_rev()
@@ -198,60 +188,54 @@ def git_push(commit=None):
         git_reset(commit)
 
 
-def read_environment():
-    if env.environment == 'prod':
-        path = '__KEYS__/%s/%s.env' % (env.app, env.environment)
-    else:
-        path = '%s/envs/%s.env' % (env.app, env.environment)
-    env_file = join(env.projects_path, path)
-    if not lexists(env_file):
-        error('No ENV file: %s' % env_file)
-        return ''
-    lines = [line.strip() for line in open(env_file).readlines()]
-    return ",".join(lines)
-
-
 def supervisor_process(service):
-    lines = []
     _name = service['name']
     args = service['args']
-    service_name = "%s_%s" % (env.app, _name)
-    if service['framework'] == 'django':
-        wsgi_app = args.get('wsgi_app', _name)
-        wsgi_app = "%s.wsgi:application" % _name
-        command = "%s run gunicorn -c guniconfig.py %s %s" % (
-            env.pipenv_path, wsgi_app, args['port'])
-    if service['framework'] == 'celery':
-        command = '%s run celery -A %s worker --loglevel=info -E --concurrency=10' % (  # NOQA
-            env.pipenv_path, env.app)
+    service_name = '%s_%s' % (env.app, _name)
+    lines = ['[program:%(service_name)s]' % locals()]
     stderr_logfile = join(env.log_path, _name + '_supervisor_error.log')
     stdout_logfile = join(env.log_path, _name + '_supervisor_access.log')
+    if service['framework'] == 'django':
+        # wsgi_app = args.get('wsgi_app', _name)
+        wsgi_app = '%s.wsgi:application' % env.app
+        command = '%s run gunicorn -c guniconfig.py %s %s' % (
+            env.pipenv_path, wsgi_app, args['port'])
+    elif service['framework'] == 'celery':
+        command = '%s run celery -A %s worker --loglevel=info -E --concurrency=10' % (  # NOQA
+            env.pipenv_path, env.app)
     params = dict(
         command=command, directory=env.app_path, stderr_logfile=stderr_logfile,
-        environment=read_environment(), stdout_logfile=stdout_logfile,
+        environment=env.shell_envs_supervisor, stdout_logfile=stdout_logfile,
         autorestart=args.get('autorestart', 'true'),
         redirect_stderr=args.get('redirect_stderr', 'true'),
-        # user=env.app_user,
+        # user=env.app_user,  # FIXME: Services should start as a system user
     )
-    lines.append('[program:%(service_name)s]' % locals())
     for key, value in sorted(params.items()):
-        lines.append("%s=%s" % (key, value))
+        lines.append('%s=%s' % (key, value))
     filename = '/etc/supervisor/conf.d/%(service_name)s.conf' % locals()
     with watch(filename, callback=supervisor.update_config, use_sudo=True):
         require.file(filename, contents='\n'.join(lines), use_sudo=True)
 
 
-def setup_service_django(service):
-    supervisor_process(service)
-    args = service['args']
+def nginx_conf(service, template):
+    kwargs = {}
+    params = {}
+    if service['framework'] == 'django':
+        args = service['args']
+        kwargs = dict(proxy_url='http://127.0.0.1:%s' % args['port'])
+    if env.environment != PROD:
+        params = {'ssl': 'certbot', 'htpasswd': True}
     _env = env.infra_data['hosts'][env.environment]
     for domain in _env['domains']:
-        template = nginx_django.render()
+        tpl = template.render(**params)
         require.nginx.site(
-            domain, proxy_url='http://127.0.0.1:%s' % args['port'],
-            docroot=env.app_path, template_contents=template,
-            var_static_app=env.var_static_app,
-        )
+            domain, docroot=env.app_path, template_contents=tpl,
+            var_static_app=env.var_static_app, **kwargs)
+
+
+def setup_service_django(service):
+    supervisor_process(service)
+    nginx_conf(service, nginx_django)
 
 
 def setup_service_celery(service):
@@ -259,21 +243,15 @@ def setup_service_celery(service):
 
 
 def setup_service_angular(service):
-    _env = env.infra_data['hosts'][env.environment]
-    for domain in _env['domains']:
-        template = nginx_client.render()
-        require.nginx.site(
-            domain, template_contents=template, docroot=env.app_path,
-            extra_ngx_config=service.get('extra_ngx_config', ''),
-            var_static_app=env.var_static_app)
+    nginx_conf(service, nginx_client)
 
 
 def setup_service(service):
     framework = service['framework']
     _setup_service = {
-        "django": setup_service_django,
-        "celery": setup_service_celery,
-        "angular": setup_service_angular,
+        'django': setup_service_django,
+        'celery': setup_service_celery,
+        'angular': setup_service_angular,
     }.get(framework)
     return _setup_service(service)
 
@@ -305,7 +283,7 @@ def ensure_deps():
 
 
 def ensure_packages_python():
-    run("%s install -d" % env.pipenv_path)
+    run('%s install -d' % env.pipenv_path)
 
 
 def ensure_packages_node():
@@ -322,41 +300,50 @@ def ensure_packages():
 
 
 def one_offs_python():
-    run("%s run ./manage.py migrate" % env.pipenv_path)
-    # run("%s run ./manage.py seed_db" % env.pipenv_path)
-    run("%s run ./manage.py collectstatic" % env.pipenv_path)
+    info("Executing: one_offs_python")
+    run('%s run ./manage.py migrate' % env.pipenv_path)
+    # run('%s run ./manage.py seed_db' % env.pipenv_path)
+    run('%s run ./manage.py collectstatic' % env.pipenv_path)
 
 
 def one_offs_node():
-    run("yarn build:%s" % env.environment)
+    run('yarn build:%s' % env.environment)
 
 
 def one_offs():
+    info("Detecting: one_offs")
     language = env.infra_data['language']
     _one_offs = {
         'python': one_offs_python,
         'node': one_offs_node,
     }.get(language)
-    return _one_offs
+    return _one_offs()
 
 
 @task
 def setup_certbot():
-    setup_env()
+    require.file('/var/do.ini', source='../__KEYS__/DO_staging.ini')
     require.deb.uptodate_index()
-    require.deb.packages(['software-properties-common'])
+    require.deb.packages([
+        'software-properties-common', 'python3-certbot-dns-digitalocean'])
     sudo('add-apt-repository universe')
     sudo('add-apt-repository ppa:certbot/certbot')
     require.deb.uptodate_index()
     sudo('apt-get install certbot python-certbot-nginx')
-    sudo('certbot --nginx')
+    sudo(
+        'certbot certonly -a dns-digitalocean -i nginx'
+        ' -d "*.reckonsys.xyz" -d reckonsys.xyz'
+        ' --server https://acme-v02.api.letsencrypt.org/directory')
+
+
+@task
+def setup_redis():
+    require.redis.instance('0')
 
 
 @task
 def setup():
-    setup_env()
     info('[setup] Starting Setup: %s -> %s' % (env.app, env.host_string))
-    '''
     require.deb.uptodate_index()
     require.deb.packages(['supervisor'])
     ensure_deps()
@@ -365,21 +352,18 @@ def setup():
         env.app_path, env.var_static_app, env.app_logs_path])
     require.file('/var/.htpasswd', source='.htpasswd')
     git_push()
-    with cd(env.app_path):
+    with cd(env.app_path), shell_env(**env.shell_envs_dict):
         ensure_packages()
         one_offs()
-    '''
-    require.redis.instance('0')
     setup_services()
     success('[setup] Finished Setup: %s -> %s' % (env.app, env.host_string))
 
 
 @task
 def deploy():
-    setup_env()
     info('[deploy] Starting Deploy: %s -> %s' % (env.app, env.host_string))
     git_push()
-    with cd(env.app_path):
+    with cd(env.app_path), shell_env(**env.shell_envs_dict):
         ensure_packages()
         one_offs()
     supervisor.update_config()
@@ -390,8 +374,6 @@ def deploy():
 
 @task
 def ping():
-    setup_env()
     info('[ping] Starting Ping: %s -> %s' % (env.app, env.host_string))
-    run("echo pong")
-    require.redis.instance('0')
+    run('echo pong')
     success('[ping] Finished Ping: %s -> %s' % (env.app, env.host_string))
