@@ -360,6 +360,7 @@ def setup_postgres():
     dbuser = prompt("Please enter a username:")
     password = prompt("Please enter the password:")
     dbname = prompt("Please enter the DB name:")
+    require.postgres.server()
     require.postgres.user(dbuser, password=password)
     require.postgres.database(dbname, owner=dbuser)
 
