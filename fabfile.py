@@ -79,18 +79,18 @@ def list_apps():
 
 
 def setup_shell_envs():
+    env.shell_envs_supervisor = ''
+    env.shell_envs_dict = {'LC_ALL': 'C.UTF-8', 'LANG': 'C.UTF-8'}
     if env.environment == 'prod':
         path = '__KEYS__/%s/%s.env' % (env.app, env.environment)
     else:
         path = '%s/envs/%s.env' % (env.app, env.environment)
     env_file = join(env.projects_path, path)
     if not lexists(env_file):
-        env.shell_envs_supervisor = ''
-        env.shell_envs_dict = {}
         return error('No ENV file: %s' % env_file)
     lines = [line.strip() for line in open(env_file).readlines()]
     env.shell_envs_supervisor = ','.join(lines)
-    env.shell_envs_dict = dotenv_values(env_file)
+    env.shell_envs_dict.update(dotenv_values(env_file))
 
 
 def setup_env(environment, app):
