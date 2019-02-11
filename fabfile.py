@@ -235,11 +235,13 @@ def supervisor_process(service):
 def nginx_conf(service, template):
     kwargs = {}
     params = {}
+    args = service.get('args', {})
     if service['framework'] == 'django':
-        args = service['args']
         kwargs = dict(proxy_url='http://127.0.0.1:%s' % args['port'])
     if env.environment != PROD:
         params = {'ssl': 'certbot', 'htpasswd': True}
+    if 'nginx_cors' in args:
+        params['nginx_cors'] = args['nginx_cors']
     _env = env.infra_data['hosts'][env.environment]
     for domain in _env['domains']:
         tpl = template.render(**params)
