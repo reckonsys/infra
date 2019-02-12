@@ -320,7 +320,7 @@ def one_offs_python():
     info("Executing: one_offs_python")
     run('%s run ./manage.py migrate' % env.pipenv_path)
     # run('%s run ./manage.py seed_db' % env.pipenv_path)
-    run('%s run ./manage.py collectstatic' % env.pipenv_path)
+    run('%s run ./manage.py collectstatic --no-input' % env.pipenv_path)
 
 
 def one_offs_node():
