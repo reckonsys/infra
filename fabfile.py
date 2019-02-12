@@ -135,6 +135,11 @@ def stag(app=None):
 
 
 @task
+def dev(app=None):
+    setup_env(DEV, app)
+
+
+@task
 def prod(app=None):
     setup_env(PROD, app)
 
@@ -239,7 +244,7 @@ def nginx_conf(service, template):
     if service['framework'] == 'django':
         kwargs = dict(proxy_url='http://127.0.0.1:%s' % args['port'])
     if env.environment != PROD:
-        params = {'ssl': 'certbot', 'htpasswd': True}
+        params = {'ssl': 'certbot', 'htpasswd': False}
     if 'nginx_cors' in args:
         params['nginx_cors'] = args['nginx_cors']
     _env = env.infra_data['hosts'][env.environment]
