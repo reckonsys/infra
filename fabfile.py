@@ -324,7 +324,7 @@ def one_offs_python():
     else:
         run('%s run ./manage.py migrate' % env.pipenv_path)
 
-    for command in env.infra_data.get('more_offs_python'):
+    for command in env.infra_data.get('more_one_offs_python'):
         run('{0} run ./manage.py {1}'.format(env.pipenv_path, command))
 
     run('%s run ./manage.py collectstatic --no-input' % env.pipenv_path)
