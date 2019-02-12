@@ -243,8 +243,10 @@ def nginx_conf(service, template):
     args = service.get('args', {})
     if service['framework'] == 'django':
         kwargs = dict(proxy_url='http://127.0.0.1:%s' % args['port'])
-    if env.environment != PROD:
-        params = {'ssl': 'certbot', 'htpasswd': False}
+    params = {
+        'ssl': args.get('ssl', 'certbot'),
+        'htpasswd': args.get('htpasswd', False),
+    }
     if 'nginx_cors' in args:
         params['nginx_cors'] = args['nginx_cors']
     _env = env.infra_data['hosts'][env.environment]
