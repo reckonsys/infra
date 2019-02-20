@@ -330,11 +330,9 @@ def one_offs_python():
             run('{0} run ./manage.py {1}'.format(env.pipenv_path, command))
     else:
         run('%s run ./manage.py migrate' % env.pipenv_path)
-
+    run('%s run ./manage.py collectstatic --no-input' % env.pipenv_path)
     for command in env.infra_data.get('more_one_offs_python'):
         run('{0} run ./manage.py {1}'.format(env.pipenv_path, command))
-
-    run('%s run ./manage.py collectstatic --no-input' % env.pipenv_path)
 
 
 def one_offs_node():
