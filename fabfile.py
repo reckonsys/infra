@@ -29,7 +29,7 @@ nginx_django = confs.get_template('nginx_django.conf')
 env.projects_path = dirname(dirname(realpath(__file__)))
 SSH_USERS = [
     'dhilipsiva', 'rs-ds', 'jinchuuriki91', 'aadil-reckonsys', 'govindsharma7',
-    'gururaj26', 'samyadh']
+    'gururaj26', 'samyadh', 'praneethreckonsys']
 
 
 class EnvNotSetup(Exception):
