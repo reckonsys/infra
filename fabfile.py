@@ -130,13 +130,13 @@ def vagrant(app=None):
 
 
 @task
-def stag(app=None):
-    setup_env(STAG, app)
+def dev(app=None):
+    setup_env(DEV, app)
 
 
 @task
-def dev(app=None):
-    setup_env(DEV, app)
+def stag(app=None):
+    setup_env(STAG, app)
 
 
 @task
@@ -326,12 +326,12 @@ def ensure_packages():
 def one_offs_python():
     info("Executing: one_offs_python")
     if env.infra_data.get('one_offs_python'):
-        for command in env.infra_data.get('one_offs_python'):
+        for command in env.infra_data.get('one_offs_python', []):
             run('{0} run ./manage.py {1}'.format(env.pipenv_path, command))
     else:
         run('%s run ./manage.py migrate' % env.pipenv_path)
     run('%s run ./manage.py collectstatic --no-input' % env.pipenv_path)
-    for command in env.infra_data.get('more_one_offs_python'):
+    for command in env.infra_data.get('more_one_offs_python', []):
         run('{0} run ./manage.py {1}'.format(env.pipenv_path, command))
 
 
