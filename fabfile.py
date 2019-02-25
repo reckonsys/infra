@@ -30,7 +30,7 @@ nginx_django = confs.get_template('nginx_django.conf')
 env.projects_path = dirname(dirname(realpath(__file__)))
 SSH_USERS = [
     'dhilipsiva', 'rs-ds', 'jinchuuriki91', 'aadil-reckonsys', 'govindsharma7',
-    'gururaj26', 'samyadh']
+    'gururaj26', 'samyadh', 'praneethreckonsys']
 
 
 class EnvNotSetup(Exception):
@@ -131,8 +131,8 @@ def vagrant(app=None):
 
 
 @task
-def stag(app=None):
-    setup_env(STAG, app)
+def dev(app=None):
+    setup_env(DEV, app)
 
 
 @task
@@ -141,8 +141,8 @@ def beta(app=None):
 
 
 @task
-def dev(app=None):
-    setup_env(DEV, app)
+def stag(app=None):
+    setup_env(STAG, app)
 
 
 @task
@@ -331,9 +331,14 @@ def ensure_packages():
 
 def one_offs_python():
     info("Executing: one_offs_python")
-    run('%s run ./manage.py migrate' % env.pipenv_path)
-    # run('%s run ./manage.py seed_db' % env.pipenv_path)
+    if env.infra_data.get('one_offs_python'):
+        for command in env.infra_data.get('one_offs_python', []):
+            run('{0} run ./manage.py {1}'.format(env.pipenv_path, command))
+    else:
+        run('%s run ./manage.py migrate' % env.pipenv_path)
     run('%s run ./manage.py collectstatic --no-input' % env.pipenv_path)
+    for command in env.infra_data.get('more_one_offs_python', []):
+        run('{0} run ./manage.py {1}'.format(env.pipenv_path, command))
 
 
 def one_offs_node():
