@@ -21,6 +21,7 @@ from fabtools import user, require, supervisor, nodejs, service as ft_service
 
 DEV = 'dev'
 STAG = 'stag'
+BETA = 'beta'
 PROD = 'prod'
 DATA_FILE = '.infra.json'
 confs = Environment(loader=FileSystemLoader('confs'))
@@ -132,6 +133,11 @@ def vagrant(app=None):
 @task
 def stag(app=None):
     setup_env(STAG, app)
+
+
+@task
+def beta(app=None):
+    setup_env(BETA, app)
 
 
 @task
