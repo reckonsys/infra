@@ -252,9 +252,9 @@ def nginx_conf(service, template):
     params = {
         'ssl': args.get('ssl', 'certbot'),
         'htpasswd': args.get('htpasswd', False),
+        'extra_nginx_confs': args.get('extra_nginx_confs', ''),
+        'nginx_cors': args.get('nginx_cors')
     }
-    if 'nginx_cors' in args:
-        params['nginx_cors'] = args['nginx_cors']
     _env = env.infra_data['hosts'][env.environment]
     for domain in _env['domains']:
         tpl = template.render(**params)
