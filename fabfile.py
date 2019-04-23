@@ -280,7 +280,8 @@ def setup_services():
 
 def ensure_deps_python():
     require.deb.packages(['python3-pip'])
-    run('pip3 install --user pipenv')
+    # run('pip3 install --user pipenv')
+    sudo('-H pip3 install -U pipenv')
 
 
 def ensure_deps_node():
