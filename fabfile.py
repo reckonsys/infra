@@ -103,9 +103,8 @@ def setup_env(environment, app):
     env.host_string = '%s@%s:%s' % (env.user, first_host, ssh_port)
     env.home_path = user.home_directory(env.user)
     env.var_static_app = join(env.home_path, 'static', env.app)
-    print(env.var_static_app)
     env.apps_path = join(env.home_path, 'apps')
-    env.logs_path = '/var/log'
+    env.logs_path = join(env.home_path, 'logs')
     env.app_logs_path = join(env.logs_path, env.app)
     env.pipenv_path = join(env.home_path, '.local/bin/pipenv')
     env.app_path = join(env.apps_path, env.app)
