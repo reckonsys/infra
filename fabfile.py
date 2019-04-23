@@ -2,7 +2,6 @@ import json
 from os import listdir
 from pipes import quote
 from posixpath import join
-from functools import wraps
 from os.path import dirname, realpath, exists as lexists
 
 import requests
@@ -57,18 +56,6 @@ def error(message):
     return log(message, red)
 
 
-def track(function):
-    """
-    Tracker
-    """
-    @wraps(function)
-    def wrapper(*args, **kwargs):
-        info('[%s] Entered' % function.__name__)
-        return function(*args, **kwargs)
-        success('[%s] Exited' % function.__name__)
-    return wrapper
-
-
 @task
 def list_apps():
     apps = []
@@ -114,8 +101,9 @@ def setup_env(environment, app):
     first_host = host['domains'][0]
     env.app_user = env.user
     env.host_string = '%s@%s:%s' % (env.user, first_host, ssh_port)
-    env.var_static_app = join('/var/static', env.app)
     env.home_path = user.home_directory(env.user)
+    env.var_static_app = join(env.home_path, 'static', env.app)
+    print(env.var_static_app)
     env.apps_path = join(env.home_path, 'apps')
     env.logs_path = '/var/log'
     env.app_logs_path = join(env.logs_path, env.app)
