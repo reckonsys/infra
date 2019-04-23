@@ -383,7 +383,7 @@ def setup():
     require.users.user(env.app_user, system=True)
     require.files.directories([
         env.app_path, env.var_static_app, env.app_logs_path])
-    require.file('/var/.htpasswd', source='.htpasswd')
+    # require.file('/var/.htpasswd', source='.htpasswd')
     git_push()
     with cd(env.app_path), shell_env(**env.shell_envs_dict):
         ensure_packages()
