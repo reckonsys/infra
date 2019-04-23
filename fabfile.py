@@ -219,7 +219,7 @@ def supervisor_process(service):
     params = dict(
         command=command, directory=env.app_path, stderr_logfile=stderr_logfile,
         environment=env.shell_envs_supervisor, stdout_logfile=stdout_logfile,
-        autorestart=args.get('autorestart', 'true'),
+        autorestart=args.get('autorestart', 'true'), user=env.user,
         redirect_stderr=args.get('redirect_stderr', 'true'),
         # user=env.app_user,  # FIXME: Services should start as a system user
     )
