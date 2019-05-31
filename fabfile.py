@@ -213,6 +213,8 @@ def supervisor_process(service):
         wsgi_app = '%s.wsgi:application' % env.app
         command = '%s run gunicorn -c guniconfig.py %s %s' % (
             env.pipenv_path, wsgi_app, args['port'])
+    if service['framework'] == 'flask':
+        command = '%s run flask run -p %s' % (env.pipenv_path, args['port'])
     elif service['framework'] == 'celery':
         command = '%s run celery -A %s worker --loglevel=info -E --concurrency=10' % (  # NOQA
             env.pipenv_path, env.app)
@@ -234,7 +236,7 @@ def nginx_conf(service, template):
     kwargs = {}
     params = {}
     args = service.get('args', {})
-    if service['framework'] == 'django':
+    if service['framework'] in ['django', 'flask']:
         kwargs = dict(proxy_url='http://127.0.0.1:%s' % args['port'])
     params = {
         'ssl': args.get('ssl', 'certbot'),
@@ -267,6 +269,7 @@ def setup_service(service):
     framework = service['framework']
     _setup_service = {
         'django': setup_service_django,
+        'flask': setup_service_django,
         'celery': setup_service_celery,
         'angular': setup_service_angular,
     }.get(framework)
