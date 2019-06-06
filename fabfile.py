@@ -382,7 +382,7 @@ def setup_postgres():
 def setup():
     info('[setup] Starting Setup: %s -> %s' % (env.app, env.host_string))
     require.deb.uptodate_index()
-    require.deb.packages(['supervisor'])
+    require.deb.packages(['supervisor', 'libgraphviz-dev'])
     ensure_deps()
     require.users.user(env.app_user, system=True)
     require.files.directories([
