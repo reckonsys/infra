@@ -18,6 +18,7 @@ from fabric.api import cd, run, puts, task, lcd, local, abort, sudo
 from fabtools.files import watch
 from fabtools import user, require, supervisor, nodejs, service as ft_service
 
+QA = 'qa'
 DEV = 'dev'
 STAG = 'stag'
 BETA = 'beta'
@@ -115,6 +116,11 @@ def setup_env(environment, app):
 @task
 def vagrant(app=None):
     setup_env(DEV, app)
+
+
+@task
+def qa(app=None):
+    setup_env(QA, app)
 
 
 @task
@@ -218,6 +224,9 @@ def supervisor_process(service):
     elif service['framework'] == 'celery':
         command = '%s run celery -A %s worker --loglevel=info -E --concurrency=10' % (  # NOQA
             env.pipenv_path, env.app)
+    elif service['framework'] == 'celery_beat':
+        command = '%s run celery -A %s beat --loglevel=info --scheduler django_celery_beat.schedulers:DatabaseScheduler' % (  # NOQA
+            env.pipenv_path, env.app)
     params = dict(
         command=command, directory=env.app_path, stderr_logfile=stderr_logfile,
         environment=env.shell_envs_supervisor, stdout_logfile=stdout_logfile,
@@ -283,8 +292,8 @@ def setup_services():
 
 def ensure_deps_python():
     require.deb.packages(['python3-pip'])
-    # run('pip3 install --user pipenv')
-    sudo('-H pip3 install -U pipenv')
+    run('pip3 install --user pipenv')
+    # sudo('-H pip3 install -U pipenv')
 
 
 def ensure_deps_node():
