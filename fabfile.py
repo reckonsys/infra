@@ -1,22 +1,25 @@
 import json
 from os import listdir
+from os.path import dirname
+from os.path import exists as lexists
+from os.path import realpath
 from pipes import quote
 from posixpath import join
-from os.path import dirname, realpath, exists as lexists
 
 import requests
 from dotenv import dotenv_values
 from jinja2 import Environment, FileSystemLoader
 
-from fabric.state import env
-from fabric.operations import prompt
-from fabric.contrib.files import exists
+from fabric.api import abort, cd, lcd, local, puts, run, sudo, task
+from fabric.colors import blue, cyan, green, red, yellow
 from fabric.context_managers import shell_env
-from fabric.colors import blue, green, red, yellow, cyan
-from fabric.api import cd, run, puts, task, lcd, local, abort, sudo
-
+from fabric.contrib.files import exists
+from fabric.operations import prompt
+from fabric.state import env
+from fabtools import nodejs, require
+from fabtools import service as ft_service
+from fabtools import supervisor, user
 from fabtools.files import watch
-from fabtools import user, require, supervisor, nodejs, service as ft_service
 
 QA = 'qa'
 DEV = 'dev'
