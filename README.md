@@ -1,3 +1,7 @@
+# DEPRECATED
+
+This repo is deprecated. We have moved to [reckonsys/bigga](https://github.com/reckonsys/bigga)
+
 # infra
 
 The Code for our infra
